@@ -235,7 +235,7 @@ mod integration_1 {
         signcert_path.push("tests/fixtures/certs/api_test_es256_certs.pem");
         let mut pkey_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         pkey_path.push("tests/fixtures/certs/api_tests_es256_private.key");
-        let signer = create_signer::from_files(signcert_path, pkey_path, SigningAlg::Ps256, None)
+        let signer = create_signer::from_files(signcert_path, pkey_path, SigningAlg::Es256, None)
             .expect("get_signer_from_files");
 
         builder.sign_file(signer.as_ref(), &parent_path, &output_path)?;
