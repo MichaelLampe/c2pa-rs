@@ -125,7 +125,7 @@ impl ValidationStatus {
 
     /// Returns `true` if this has a successful validation code.
     pub fn passed(&self) -> bool {
-        is_success(&self.code)
+        self.kind != LogKind::Failure
     }
 
     /// Returns the LogKind for this validation status.
@@ -200,7 +200,7 @@ impl PartialEq for ValidationStatus {
 
 use crate::validation_results::ValidationResults;
 /// Given a `Store` and a `StatusTracker`, return `ValidationResultsMap
-pub fn validation_results_for_store(
+pub(crate) fn validation_results_for_store(
     store: &Store,
     validation_log: &impl StatusTracker,
 ) -> ValidationResults {
@@ -287,6 +287,7 @@ pub fn validation_results_for_store(
 /// Given a `Store` and a `StatusTracker`, return `ValidationStatus` items for each
 /// item in the tracker which reflect errors in the active manifest or which would not
 /// be reported as a validation error for any ingredient.
+#[cfg(feature = "v1_api")]
 pub fn status_for_store(
     store: &Store,
     validation_log: &impl StatusTracker,

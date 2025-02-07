@@ -303,13 +303,17 @@ pub const GENERAL_ERROR: &str = "general.error";
 /// assert!(is_success(CLAIM_SIGNATURE_VALIDATED));
 /// assert!(!is_success(SIGNING_CREDENTIAL_REVOKED));
 /// ```
+#[deprecated(
+    since = "0.46.0",
+    note = "Please use ValidationStatus.kind() (LogKind) instead"
+)]
 pub fn is_success(status_code: &str) -> bool {
     matches!(log_kind(status_code), LogKind::Success)
 }
 
 /// Returns the [`LogKind`] for a given status code.
-// TODO: This needs to be expanded to include all status codes.
-pub fn log_kind(status_code: &str) -> LogKind {
+// TODO: This needs to be expanded to include all status codes
+fn log_kind(status_code: &str) -> LogKind {
     match status_code {
         CLAIM_SIGNATURE_VALIDATED
         | SIGNING_CREDENTIAL_TRUSTED
