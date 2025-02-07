@@ -86,6 +86,7 @@ pub enum ClaimAssetData<'a> {
     Path(&'a Path),
     Bytes(&'a [u8], &'a str),
     Stream(&'a mut dyn CAIRead, &'a str),
+    #[allow(dead_code)] // last parameter never used
     StreamFragment(&'a mut dyn CAIRead, &'a mut dyn CAIRead, &'a str),
     #[cfg(feature = "file_io")]
     StreamFragments(&'a mut dyn CAIRead, &'a Vec<std::path::PathBuf>, &'a str),

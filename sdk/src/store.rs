@@ -91,6 +91,7 @@ pub struct Store {
     claims_map: HashMap<String, usize>,
     manifest_box_hash_cache: HashMap<String, (Vec<u8>, Vec<u8>)>,
     claims: Vec<Claim>,
+    #[allow(dead_code)]
     label: String,
     provenance_path: Option<String>,
     ctp: CertificateTrustPolicy,
@@ -122,6 +123,7 @@ impl Default for Store {
     }
 }
 
+#[allow(dead_code)] // Store is still public in the v1_api and generates a pile of warnings otherwise
 impl Store {
     /// Create a new, empty claims store.
     pub fn new() -> Self {
