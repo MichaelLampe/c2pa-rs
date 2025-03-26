@@ -35,10 +35,6 @@ use crate::jumbf_io::save_jumbf_to_memory;
 use crate::jumbf_io::{
     get_file_extension, get_supported_file_extension, load_jumbf_from_file, save_jumbf_to_file,
 };
-#[cfg(all(feature = "v1_api", feature = "file_io"))]
-use crate::jumbf_io::{object_locations, remove_jumbf_from_file};
-#[cfg(all(feature = "file_io", feature = "v1_api"))]
-use crate::utils::io_utils::tempdirectory;
 use crate::{
     assertion::{
         Assertion, AssertionBase, AssertionData, AssertionDecodeError, AssertionDecodeErrorCause,
@@ -80,6 +76,11 @@ use crate::{
 };
 #[cfg(feature = "v1_api")]
 use crate::{external_manifest::ManifestPatchCallback, RemoteSigner};
+#[cfg(all(feature = "v1_api", feature = "file_io"))]
+use crate::{
+    jumbf_io::{object_locations, remove_jumbf_from_file},
+    utils::io_utils::tempdirectory,
+};
 
 const MANIFEST_STORE_EXT: &str = "c2pa"; // file extension for external manifests
 
@@ -3386,7 +3387,7 @@ impl Store {
     }
 
     /// Return Store from in memory asset
-    #[cfg(any(feature = "file_io", feature = "v1_api"))]
+    #[cfg(any(feature = "v1_api", all(test, feature = "file_io")))]
     fn load_cai_from_memory(
         asset_type: &str,
         data: &[u8],
@@ -3860,6 +3861,7 @@ pub mod tests {
         jumbf_io::{get_assetio_handler_from_path, update_file_jumbf},
         utils::{
             hash_utils::Hasher,
+            io_utils::tempdirectory,
             patch::patch_file,
             test::{
                 create_test_claim, fixture_path, temp_dir_path, temp_fixture_path,
@@ -5729,7 +5731,7 @@ pub mod tests {
     }
 
     #[test]
-    #[cfg(feature = "file_io")]
+    #[cfg(all(feature = "file_io", feature = "v1_api"))]
     fn test_tiff_jumbf_generation() {
         // test adding to actual image
         let ap = fixture_path("TUSCANY.TIF");
@@ -5885,7 +5887,6 @@ pub mod tests {
     }
 
     #[test]
-    #[cfg(feature = "file_io")]
     fn test_boxhash_embeddable_manifest() {
         // test adding to actual image
         let ap = fixture_path("boxhash.jpg");
@@ -5966,7 +5967,6 @@ pub mod tests {
 
     #[cfg_attr(not(target_arch = "wasm32"), actix::test)]
     #[cfg_attr(target_os = "wasi", wstd::test)]
-    #[cfg(feature = "file_io")]
     async fn test_datahash_embeddable_manifest_async() {
         // test adding to actual image
         use std::io::SeekFrom;
@@ -5989,19 +5989,11 @@ pub mod tests {
             .get_data_hashed_manifest_placeholder(signer.reserve_size(), "jpeg")
             .unwrap();
 
-        let temp_dir = tempdirectory().unwrap();
-        let output = temp_dir_path(&temp_dir, "boxhash-out.jpg");
-        let mut output_file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&output)
-            .unwrap();
+        let mut output_stream = Cursor::new(Vec::new());
 
         // write a jpeg file with a placeholder for the manifest (returns offset of the placeholder)
         let offset =
-            write_jpeg_placeholder_file(&placeholder, &ap, &mut output_file, None).unwrap();
+            write_jpeg_placeholder_file(&placeholder, &ap, &mut output_stream, None).unwrap();
 
         // build manifest to insert in the hole
 
@@ -6013,28 +6005,39 @@ pub mod tests {
         dh.exclusions = Some(exclusions);
 
         // get the embeddable manifest, letting API do the hashing
-        output_file.rewind().unwrap();
+        output_stream.rewind().unwrap();
         let cm = store
-            .get_data_hashed_embeddable_manifest_async(&dh, &signer, "jpeg", Some(&mut output_file))
+            .get_data_hashed_embeddable_manifest_async(
+                &dh,
+                &signer,
+                "jpeg",
+                Some(&mut output_stream),
+            )
             .await
             .unwrap();
 
         // path in new composed manifest
-        output_file.seek(SeekFrom::Start(offset as u64)).unwrap();
-        output_file.write_all(&cm).unwrap();
+        output_stream.seek(SeekFrom::Start(offset as u64)).unwrap();
+        output_stream.write_all(&cm).unwrap();
+
+        // convert our cursor back into a buffer
+        let output = output_stream.into_inner();
 
         let mut report = StatusTracker::default();
-        let new_store = Store::load_from_asset(&output, false, &mut report).unwrap();
+        let new_store = Store::load_cai_from_memory("image/jpeg", &output, &mut report).unwrap();
 
-        Store::verify_store_async(&new_store, &mut ClaimAssetData::Path(&output), &mut report)
-            .await
-            .unwrap();
+        Store::verify_store_async(
+            &new_store,
+            &mut ClaimAssetData::Bytes(&output, "image/jpeg"),
+            &mut report,
+        )
+        .await
+        .unwrap();
 
         assert!(!report.has_any_error());
     }
 
     #[test]
-    #[cfg(feature = "file_io")]
     fn test_datahash_embeddable_manifest() {
         // test adding to actual image
 
@@ -6057,19 +6060,11 @@ pub mod tests {
             .get_data_hashed_manifest_placeholder(Signer::reserve_size(&signer), "jpeg")
             .unwrap();
 
-        let temp_dir = tempdirectory().unwrap();
-        let output = temp_dir_path(&temp_dir, "boxhash-out.jpg");
-        let mut output_file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&output)
-            .unwrap();
+        let mut output_stream = Cursor::new(Vec::new());
 
         // write a jpeg file with a placeholder for the manifest (returns offset of the placeholder)
         let offset =
-            write_jpeg_placeholder_file(&placeholder, &ap, &mut output_file, None).unwrap();
+            write_jpeg_placeholder_file(&placeholder, &ap, &mut output_stream, None).unwrap();
 
         // build manifest to insert in the hole
 
@@ -6081,22 +6076,25 @@ pub mod tests {
         dh.exclusions = Some(exclusions);
 
         // get the embeddable manifest, letting API do the hashing
-        output_file.rewind().unwrap();
+        output_stream.rewind().unwrap();
         let cm = store
             .get_data_hashed_embeddable_manifest(
                 &dh,
                 signer.as_ref(),
                 "jpeg",
-                Some(&mut output_file),
+                Some(&mut output_stream),
             )
             .unwrap();
 
         // path in new composed manifest
-        output_file.seek(SeekFrom::Start(offset as u64)).unwrap();
-        output_file.write_all(&cm).unwrap();
+        output_stream.seek(SeekFrom::Start(offset as u64)).unwrap();
+        output_stream.write_all(&cm).unwrap();
+
+        // convert our cursor back into a buffer
+        let output = output_stream.into_inner();
 
         let mut report = StatusTracker::default();
-        let _new_store = Store::load_from_asset(&output, true, &mut report).unwrap();
+        let _new_store = Store::load_cai_from_memory("image/jpeg", &output, &mut report).unwrap();
 
         assert!(!report.has_any_error());
     }
@@ -6402,7 +6400,7 @@ pub mod tests {
 
         // make sure we can read from new file
         let mut report = StatusTracker::default();
-        let new_store = Store::load_from_memory("jpeg", &result, false, &mut report).unwrap();
+        let new_store = Store::load_cai_from_memory("jpeg", &result, &mut report).unwrap();
 
         println!("new_store: {}", new_store);
 
@@ -6539,7 +6537,7 @@ pub mod tests {
 
         // make sure we can read from new file
         let mut report = StatusTracker::default();
-        let new_store = Store::load_from_memory("jpeg", &result, false, &mut report).unwrap();
+        let new_store = Store::load_cai_from_memory("jpeg", &result, &mut report).unwrap();
 
         println!("new_store: {}", new_store);
 
