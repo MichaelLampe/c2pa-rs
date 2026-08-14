@@ -62,7 +62,43 @@ impl AsRef<Vec<ByteBuf>> for CertificateStatus {
     }
 }
 
-impl AssertionCbor for CertificateStatus {}
+impl AssertionCbor for CertificateStatus {
+    fn to_cbor_assertion(&self) -> Result<Assertion> {
+        CertificateStatusCbor {
+            ocsp_vals: self.ocsp_vals.clone(),
+        }
+        .to_cbor_assertion()
+    }
+
+    fn from_cbor_assertion(assertion: &Assertion) -> Result<Self> {
+        CertificateStatusCbor::from_cbor_assertion(assertion).map(|status| Self {
+            ocsp_vals: status.ocsp_vals,
+        })
+    }
+}
+
+// c2pa_cbor currently reports itself as human-readable to Serde. A distinct
+// CBOR wire type prevents that incorrect signal from applying JSON's Base64
+// encoding to OCSP responses, which the C2PA schema requires to be byte strings.
+#[derive(Deserialize, Serialize)]
+struct CertificateStatusCbor {
+    #[serde(rename = "ocspVals", deserialize_with = "deserialize_cbor_bytes_vec")]
+    ocsp_vals: Vec<ByteBuf>,
+}
+
+impl AssertionCbor for CertificateStatusCbor {}
+
+impl AssertionBase for CertificateStatusCbor {
+    const LABEL: &'static str = CertificateStatus::LABEL;
+
+    fn to_assertion(&self) -> Result<Assertion> {
+        self.to_cbor_assertion()
+    }
+
+    fn from_assertion(assertion: &Assertion) -> Result<Self> {
+        Self::from_cbor_assertion(assertion)
+    }
+}
 
 impl AssertionBase for CertificateStatus {
     const LABEL: &'static str = Self::LABEL;
@@ -115,12 +151,32 @@ where
     }
 }
 
+fn deserialize_cbor_bytes_vec<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Vec<ByteBuf>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<c2pa_cbor::Value>::deserialize(deserializer)?
+        .into_iter()
+        .map(|value| match value {
+            c2pa_cbor::Value::Bytes(bytes) => Ok(ByteBuf::from(bytes)),
+            _ => Err(serde::de::Error::custom(
+                "certificate-status OCSP responses must be CBOR byte strings",
+            )),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 pub mod tests {
     #![allow(clippy::expect_used)]
     #![allow(clippy::unwrap_used)]
 
-    use crate::{assertion::AssertionBase, assertions::CertificateStatus};
+    use crate::{
+        assertion::{Assertion, AssertionBase, AssertionData},
+        assertions::CertificateStatus,
+    };
 
     #[test]
     fn assertions_certificate_status() {
@@ -132,8 +188,30 @@ pub mod tests {
         assert_eq!(assertion.mime_type(), "application/cbor");
         assert_eq!(assertion.label(), CertificateStatus::LABEL);
 
+        let c2pa_cbor::Value::Map(values) = c2pa_cbor::from_slice(assertion.data()).unwrap() else {
+            panic!("certificate status assertion must contain a CBOR map");
+        };
+        assert_eq!(
+            values.get(&c2pa_cbor::Value::Text("ocspVals".to_owned())),
+            Some(&c2pa_cbor::Value::Array(vec![c2pa_cbor::Value::Bytes(
+                b"ocsp_val".to_vec(),
+            )])),
+        );
+
         let result = CertificateStatus::from_assertion(&assertion).unwrap();
         assert_eq!(result, original)
+    }
+
+    #[test]
+    fn certificate_status_rejects_base64_text_in_cbor() {
+        let malformed = serde_json::json!({ "ocspVals": ["b2NzcF92YWw="] });
+        let assertion = Assertion::new(
+            CertificateStatus::LABEL,
+            None,
+            AssertionData::Cbor(c2pa_cbor::to_vec(&malformed).unwrap()),
+        );
+
+        assert!(CertificateStatus::from_assertion(&assertion).is_err());
     }
 
     #[test]
@@ -145,7 +223,8 @@ pub mod tests {
           ]
         });
 
-        let original: CertificateStatus = serde_json::from_value(json).unwrap();
+        let original: CertificateStatus = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&original).unwrap(), json);
         let assertion = original.to_assertion().unwrap();
         let result = CertificateStatus::from_assertion(&assertion).unwrap();
 

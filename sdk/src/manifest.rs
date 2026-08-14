@@ -23,7 +23,10 @@ use uuid::Uuid;
 
 use crate::{
     assertion::{AssertionBase, AssertionData},
-    assertions::{labels, Actions, AssertionMetadata, EmbeddedData, Metadata, SoftwareAgent},
+    assertions::{
+        labels, Actions, AssertionMetadata, CertificateStatus, EmbeddedData, Metadata,
+        SoftwareAgent,
+    },
     claim::{ClaimAssertionType, RemoteManifest},
     dynamic_assertion::PartialClaim,
     error::{Error, Result},
@@ -607,7 +610,17 @@ impl Manifest {
                     let thumbnail = EmbeddedData::from_assertion(assertion)?;
                     let id = to_assertion_uri(claim.label(), label);
                     manifest.thumbnail = Some(ResourceRef::new(&thumbnail.content_type, &id));
-                } // handle special case for AssertionMetadata
+                }
+                labels::CERTIFICATE_STATUS => {
+                    // Generic CBOR-to-JSON conversion turns byte strings into integer
+                    // arrays; the typed assertion preserves its public Base64 form.
+                    let certificate_status = CertificateStatus::from_assertion(assertion)?;
+                    let manifest_assertion =
+                        ManifestAssertion::from_assertion(&certificate_status)?
+                            .set_instance(claim_assertion.instance())
+                            .set_created(created);
+                    manifest.assertions.push(manifest_assertion);
+                }
                 labels::ASSERTION_METADATA => {
                     let assertion_metadata = AssertionMetadata::from_assertion(assertion)?;
                     let manifest_assertion =
